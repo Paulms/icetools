@@ -1,3 +1,4 @@
+from __future__ import print_function
 """A 2D demo of the icetools code"""
 
 __author__ = "Alexander H. Jarosch (research@alexj.at)"
@@ -20,7 +21,6 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with icetools.  If not, see <http://www.gnu.org/licenses/>."""
-
 
 from dolfin import *
 import time
@@ -66,7 +66,7 @@ nglen = 3.0             # Glen's n
 nu = Constant(8e13)     # initial viscosity of ice, before viscosity iteration
 
 # Load the mesh from a gmsh generated file
-mesh = Mesh("column2D.xml.gz")
+mesh = Mesh("code/icetools-0.9/column2D.xml.gz")
 
 # Define the sub domains for the boundary conditions
 def NoslipBoundary(x, on_boundary):
@@ -74,28 +74,30 @@ def NoslipBoundary(x, on_boundary):
 
 # Define the periodic boundary on the vertical faces in X direction
 class PeriodicBoundary_x(SubDomain):
-
     def inside(self, x, on_boundary):
-        return x[0] == 0 and on_boundary
+        return bool(x[0] < DOLFIN_EPS and x[0] > -DOLFIN_EPS and on_boundary)
 
     def map(self, x, y):
         y[0] = x[0] - cs_length
         y[1] = x[1]
 
+# Apply the periodic boundary condition in X
+pbc_x = PeriodicBoundary_x()
+
 # Define function spaces
-V = VectorFunctionSpace(mesh, "CG", 2)
-Q = FunctionSpace(mesh, "CG", 1)
-W = V * Q
+#V = VectorFunctionSpace(mesh, "CG", 2)
+#Q = FunctionSpace(mesh, "CG", 1)
+#W = V * Q
+Hh = VectorElement('P', triangle, 2) #Velocity
+Qh = FiniteElement('P', triangle, 1) #Presure
+W = FunctionSpace(mesh, Hh*Qh, constrained_domain = pbc_x)
 
 # Apply a no-slip boundary condition for velocity
 noslip = Constant((0,0))
 bc0 = DirichletBC(W.sub(0), noslip, NoslipBoundary)
-# Apply the periodic boundary condition in X
-pbc_x = PeriodicBoundary_x()
-bc1 = PeriodicBC(W.sub(0), pbc_x)
 
 # Collect boundary conditions
-bcs = [bc0, bc1]
+bcs = [bc0]
 
 # Define variational problem
 (v_i, q_i) = TestFunctions(W)
@@ -126,8 +128,8 @@ ue_x0 = '%g * (pow(%g,%g+1) - pow(%g-x[1],%g+1))' % (Aterm1, H, nglen, H, nglen)
 ue_x1 = '0.0'
 
 # Evaluate the equation on the mesh to create a 3D field of the solution
-ue_E = Expression((ue_x0,ue_x1))
-u_e = interpolate(ue_E, V)
+ue_E = Expression((ue_x0,ue_x1),degree=5)
+u_e = interpolate(ue_E, W.sub(0).collapse())
 
 # Write the solution to a file 
 uefile_pvd = File("velocity_exact.pvd")
@@ -135,7 +137,7 @@ uefile_pvd << u_e
 
 # Calculate the L2 error norm between the numerical and analytical solution
 eps_a = errornorm(u, u_e, "L2")
-print 'L2 norm error u-uA:', eps_a*365*24*3600, ' in m/year'
+print('L2 norm error u-uA:', eps_a*365*24*3600, ' in m/year')
 
 # Calculate the strain invariant and viscosity
 V_s = FunctionSpace(mesh, "CG", 2)
@@ -202,27 +204,27 @@ while u_eps > max_u_err and it < max_it:
     err_array = numpy.append(err_array, eps_a)
     ueps_array = numpy.append(ueps_array, u_eps)
     
-    print '########################################'
-    print '### L2 u - uA:', eps_a*365*24*3600, ' in m/year'
-    print '### L2 diff u:', u_eps*365*24*3600, ' in m/year'
-    print '########################################'
+    print('########################################')
+    print('### L2 u - uA:', eps_a*365*24*3600, ' in m/year')
+    print('### L2 diff u:', u_eps*365*24*3600, ' in m/year')
+    print('########################################')
     it = it + 1
     
     
 t_needed = (time.time() - tstart)
 
-print '\n'
-print '====================== R E S U L T ============================================='
+print('\n')
+print('====================== R E S U L T =============================================')
 if it == max_it:
-    print 'WARNING! Max number of iterations taken, error between u and uA still:',  eps_a*365*24*3600, ' in m/year'
-    print 'diff U error is: ', u_eps*365*24*3600, ' and should be: ', max_u_err*365*24*3600, ' in mm/year'
-    print 'probably your grid size is too large in some regions to get this kind of accuracy'
-    print '\n'
+    print('WARNING! Max number of iterations taken, error between u and uA still:',  eps_a*365*24*3600, ' in m/year')
+    print('diff U error is: ', u_eps*365*24*3600, ' and should be: ', max_u_err*365*24*3600, ' in mm/year')
+    print('probably your grid size is too large in some regions to get this kind of accuracy')
+    print('\n')
     
-print "it took: " + str(t_needed) + " seconds to solve the problem ;)"       
-print 'All done ;)'
-print 'Iterations taken: ', it, ' diff U is: ', u_eps*365*24*3600, ' mm/year'
-print '================================================================================'
+print("it took: " + str(t_needed) + " seconds to solve the problem ;)")
+print('All done ;)')
+print('Iterations taken: ', it, ' diff U is: ', u_eps*365*24*3600, ' mm/year')
+print('================================================================================')
 
 # Save the final solution
 uendfile_pvd = File("velocity_end.pvd")
@@ -243,3 +245,6 @@ plt.xlabel('Iterations')
 plt.ylabel('log L2norm uk+1 - uk')
 
 plt.show()
+plt.savefig("errors.png")
+ug = plot(u)
+ug.figure.savefig("velocity_end.png")
